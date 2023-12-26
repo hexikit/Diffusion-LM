@@ -557,19 +557,22 @@ def reorder_outfits(item_id_to_l1_code, outfit_id_to_item_ids_list):
     return sorted_outfits
 
 class PolyvoreOutfitCatalog(PolyvoreItemCatalog):
-    def __init__(self, args, split, meta_data, device, outfit_tokenizer_model, special_tokens_dict, max_txt_len=77, transform=None, loader=default_image_loader, pretrain=True):
+    def __init__(self, args, split, meta_data, device, outfit_tokenizer_model, special_tokens_dict, special_tokens_to_embs, max_txt_len=77, transform=None, loader=default_image_loader, pretrain=True):
         super().__init__(args, split, meta_data, device, max_txt_len, transform, loader)
+        self.special_tokens_dict = special_tokens_dict
+        self.special_tokens_to_embs = special_tokens_to_embs
+
         self.bos_token_id = special_tokens_dict['start_token_id']
         self.eos_token_id = special_tokens_dict['end_token_id']
         self.item_start_token_id = special_tokens_dict['item_start_token_id']
         self.pad_token_id = special_tokens_dict['pad_token_id']
         self.mask_token_id = special_tokens_dict['mask_token_id']
         self.retrieval_token_id = special_tokens_dict['retrieval_token_id']
-        self.special_tokens_dict = special_tokens_dict
 
-        self.use_retrieval_token = args.use_retrieval_token
-        if self.use_retrieval_token:
-            print(f"Training w/ retrieval token")
+
+        # self.use_retrieval_token = args.use_retrieval_token
+        # if self.use_retrieval_token:
+        #     print(f"Training w/ retrieval token")
 
         self.codebook_n_levels = outfit_tokenizer_model.codebook_n_levels
         self.vocab_size = outfit_tokenizer_model.codebook_n_levels * outfit_tokenizer_model.codebook_size
@@ -731,8 +734,10 @@ class PolyvoreOutfitCatalog(PolyvoreItemCatalog):
             # print(f"padding_size: {padding_size}")
             input_ids = F.pad(tokenized_outfit_item_codes, pad=(0, padding_size), value=self.pad_token_id)
 
-            latent_dim = tokenized_outfit_item_code_embs.shape[-1]
-            pad_token_embs = torch.randn(padding_size, latent_dim)
+            # latent_dim = tokenized_outfit_item_code_embs.shape[-1]
+            # pad_token_embs = torch.randn(padding_size, latent_dim)
+            pad_token_emb = self.special_tokens_to_embs[self.pad_token_id].clone()
+            pad_token_embs = pad_token_emb.repeat(padding_size, 1)
             hidden_states = torch.cat((tokenized_outfit_item_code_embs, pad_token_embs))
 
             attention_mask = (input_ids != self.pad_token_id).bool()
@@ -965,7 +970,19 @@ class PolyvoreOutfitCatalog(PolyvoreItemCatalog):
         outfit_items_code_embs_flattened = outfit_items_code_embs_tensor.view(-1, latent_dim)
         # print(f"outfit_items_codes_flattened: {outfit_items_codes_flattened.shape}")
         # print(f"outfit_items_code_embs_flattened: {outfit_items_code_embs_flattened.shape}")
-        return outfit_items_codes_flattened, outfit_items_code_embs_flattened
+
+        # Add special tokens:
+        bos_token = torch.tensor([self.bos_token_id], dtype=torch.long)
+        eos_token = torch.tensor([self.eos_token_id], dtype=torch.long)
+        outfit_items_codes = torch.cat((bos_token, outfit_items_codes_flattened, eos_token))
+
+        bos_token_emb = self.special_tokens_to_embs[self.bos_token_id].clone()
+        eos_token_emb = self.special_tokens_to_embs[self.eos_token_id].clone()
+        outfit_items_code_embs = torch.cat((bos_token_emb, outfit_items_code_embs_flattened, eos_token_emb))
+        # print(f"outfit_items_codes: {outfit_items_codes.shape}")
+        # print(f"outfit_items_code_embs: {outfit_items_code_embs.shape}")
+
+        return outfit_items_codes, outfit_items_code_embs
     
     
     def _tokenize_outfit_old(self, outfit_items_idxs):

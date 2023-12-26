@@ -7,7 +7,7 @@ import sys, yaml, os
 # sys.path.insert(0, os.path.join(sys.path[0], '../../transformers/examples/pytorch/language-modeling'))
 # from custom_trainer import GPT2LMHeadModelCompress, BERTModelCompress, AutoEncoderWithNoise
 
-def load_models(modality, mode, model_name_or_path, emb_dim, file, extra_args=None):
+def load_models(modality, mode, model_name_or_path, emb_dim, file, vocab_size=None, extra_args=None):
 
     if mode in ['random', 'random1', 'random_up_proj', 'glove']:
         if modality == 'synth':
@@ -29,6 +29,11 @@ def load_models(modality, mode, model_name_or_path, emb_dim, file, extra_args=No
             model.load_state_dict(torch.load(path_save))
             print(dataset.vocab)
             tokenizer = {v: k for k, v in dataset.vocab.items()}
+        elif modality == 'outfit':
+            tokenizer = None
+            model = torch.nn.Embedding(vocab_size, emb_dim)
+            path_save = '{}/random_emb.torch'.format(file)
+            # model.load_state_dict(torch.load(path_save))
         else:
             import json
             if modality == 'book' or (extra_args is not None and extra_args.use_bert_tokenizer == 'yes'):

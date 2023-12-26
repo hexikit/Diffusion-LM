@@ -4,10 +4,12 @@ import sys, os
 import torch
 import json
 
-from outfit_catalogs import PolyvoreOutfitCatalog
-from rq_vae import RQVAENew
+from .outfit_catalogs import PolyvoreOutfitCatalog
+from .rq_vae import RQVAENew
 
-def load_data_outfit(args):
+def load_data_outfit(args, split, special_tokens_dict, special_tokens_to_embs):
+    device = torch.device('cpu')
+
     rq_vae = RQVAENew(args)
     if args.pretrained_rqvae:
         print("=> loading pretrained weights '{}'".format(args.pretrained_rqvae))
@@ -18,22 +20,10 @@ def load_data_outfit(args):
     device_cpu = torch.device('cpu')
     rq_vae.to(device_cpu)
 
-    vocab_size = rq_vae.codebook_n_levels * rq_vae.codebook_size
-    special_tokens_dict = {
-        'start_token_id': vocab_size,
-        'end_token_id': vocab_size + 1,
-        'item_start_token_id': vocab_size + 2,
-        'pad_token_id': vocab_size + 3,
-        'mask_token_id': vocab_size + 4,
-        'retrieval_token_id': vocab_size + 5,
-    }
-
     fn = os.path.join(args.datadir, 'polyvore_outfits', 'polyvore_item_metadata.json')
     meta_data = json.load(open(fn, 'r'))
 
-    device = torch.device('cpu')
-
-    outfit_catalog = PolyvoreOutfitCatalog(args, 'train', meta_data, device, rq_vae, special_tokens_dict)
+    outfit_catalog = PolyvoreOutfitCatalog(args, split, meta_data, device, rq_vae, special_tokens_dict)
     training_data = outfit_catalog.get_data()
 
     dataset = OutfitDataset(
@@ -43,13 +33,17 @@ def load_data_outfit(args):
         # data_args,
         # model_arch=data_args.model_arch,
     )
-    return DataLoader(
+
+    data_loader = DataLoader(
         dataset,
         batch_size=64,  # 20,
         drop_last=True,
-        shuffle=True,
+        shuffle=False,
         num_workers=1,
     )
+    
+    while True:
+        yield from data_loader
 
 class OutfitDataset(Dataset):
     def __init__(self, outfit_datasets, data_args, model_arch='conv-unet',
@@ -81,8 +75,8 @@ class OutfitDataset(Dataset):
         out_dict['input_ids'] = np.array(self.outfit_datasets[idx]['input_ids'])
         # out_dict['mapping_func'] = self.mapping_func
         if self.data_args.experiment_mode == 'conditional_gen':
-            out_dict['src_ids'] = np.array(self.outfit_datasets['train'][idx]['src_ids'])
-            out_dict['src_mask'] = np.array(self.outfit_datasets['train'][idx]['src_mask'])
+            out_dict['src_ids'] = np.array(self.outfit_datasets[idx]['src_ids'])
+            out_dict['src_mask'] = np.array(self.outfit_datasets[idx]['src_mask'])
         # if self.local_classes is not None:
         #     out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)
         return arr, out_dict

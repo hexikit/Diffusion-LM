@@ -22,6 +22,7 @@ from transformers import set_seed
 from functools import partial
 from improved_diffusion.test_util import get_weights, compute_logp
 from improved_diffusion.rounding import load_models, load_tokenizer
+from improved_diffusion.rq_vae import RQVAENew, MergedCodebook
 import torch.distributed as dist
 import wandb
 
@@ -31,10 +32,39 @@ def main():
     dist_util.setup_dist() # DEBUG **
     logger.configure()
 
+    vocab_size = args.rqvae_codebook_n_levels * args.rqvae_codebook_n_levels
+    special_tokens_dict = {
+        'start_token_id': vocab_size,
+        'end_token_id': vocab_size + 1,
+        'item_start_token_id': vocab_size + 2,
+        'pad_token_id': vocab_size + 3,
+        'mask_token_id': vocab_size + 4,
+        'retrieval_token_id': vocab_size + 5,
+    }
+    n_special_tokens = len(special_tokens_dict)
+    vocab_size += n_special_tokens
+    args.vocab_size = vocab_size
+
+    rq_vae = RQVAENew(args)
+    if args.pretrained_rqvae:
+        print("=> loading pretrained weights '{}'".format(args.pretrained_rqvae))
+        checkpoint = torch.load(args.pretrained_rqvae)
+        rq_vae.load_state_dict(checkpoint['state_dict'])
+        print("=> loaded pretrained weights '{}'"
+                .format(args.pretrained_rqvae))
+        
+    merged_codebook = MergedCodebook(rq_vae.residual_vq.codebooks, n_special_tokens, special_tokens_dict['pad_token_id'])
+
+    special_tokens_to_embs = {}
+    for special_token, special_token_id in special_tokens_dict.items():
+        special_token_tensor = torch.tensor([special_token_id])
+        special_tokens_to_embs[special_token] = merged_codebook(special_token_tensor)
+
 
     logger.log("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(
-        **args_to_dict(args, model_and_diffusion_defaults().keys())
+        **args_to_dict(args, model_and_diffusion_defaults().keys()),
+        codebook=merged_codebook
     )
     model.to(dist_util.dev()) #  DEBUG **
     # model.cuda() #  DEBUG **
@@ -69,9 +99,17 @@ def main():
         data_valid = None
     elif args.modality == 'outfit':
         data = load_data_outfit(
-            args
+            args,
+            'train',
+            special_tokens_dict,
+            special_tokens_to_embs
         )
-        data_valid = None
+        data_valid = load_data_outfit(
+            args,
+            'valid',
+            special_tokens_dict,
+            special_tokens_to_embs
+        )
     else:
         print('load data', '*'*50)
         if args.modality == 'roc-aug' or args.modality == 'commonGen-aug':
@@ -135,8 +173,12 @@ def main():
     # while not os.path.exists(os.path.join(args.checkpoint_path, 'vocab.json')):
     #     time.sleep(1)
     def get_mapping_func(args, diffusion, data):
-        model2, tokenizer = load_models(args.modality, args.experiment, args.model_name_or_path, args.in_channel,
-                                        args.checkpoint_path, extra_args=args)
+        if args.modality == 'outfit':
+            model2, tokenizer = load_models(args.modality, args.experiment, args.model_name_or_path, args.in_channel,
+                                            args.checkpoint_path, vocab_size=vocab_size, extra_args=args)
+        else:
+            model2, tokenizer = load_models(args.modality, args.experiment, args.model_name_or_path, args.in_channel,
+                                            args.checkpoint_path, extra_args=args)
         model3 = get_weights(model2, args)
         print(model3, model3.weight.requires_grad)
         mapping_func = partial(compute_logp, args, model3.cuda())
@@ -208,6 +250,7 @@ def create_argparser():
                          config='diffusion_lm/synthetic_data/configs/emnlp2020/experiments/difflm_seed0_m3_k128_trainc20000.yaml',
                          model_name_or_path='predictability/diff_models/compress_e=5_b=60_m=gpt2_wikitext-103-raw-v1_None',
                          experiment='gpt2_pre_compress',model_arch='transformer',
+                         item_embed_dim=512,
                          img_embed_dim=512,
                          txt_embed_dim=512,
                          outfit_min_items=4,
@@ -216,9 +259,10 @@ def create_argparser():
                          rqvae_codebook_size=256,
                          rqvae_latent_dim=64,
                          rqvae_dropout=0.0,
+                         vocab_size=1030,
                          pretrained_rqvae='/content/drive/MyDrive/FitFormer/runs/rq_vae/nondisjoint/rq_vae_5_a/ep20_checkpoint.pth',
                          polyvore_split='nondisjoint',
-                         datadir='data',
+                         datadir='/content/data',
                          embedsdir='/content/drive/MyDrive/FitFormer/embeds/nondisjoint/fashion_clip_embeds_text2outfit',
                          txt_enc_model='patrickjohncyh/fashion-clip',
                          img_enc_model='patrickjohncyh/fashion-clip',

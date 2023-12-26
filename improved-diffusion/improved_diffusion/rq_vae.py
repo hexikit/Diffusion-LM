@@ -84,29 +84,27 @@ class RQVAENew(nn.Module):
         return x_hat, indices, commit_loss, all_codes
 
 
-class RQVAEDecoder(nn.Module):
-    def __init__(self, z_dim, hidden_dims, out_dim, non_linear=False, use_batch_norm=False, dropout=0.0):
-        super(RQVAEDecoder, self).__init__()
-        self.z_dim = z_dim
-        self.out_dim = out_dim
+class MergedCodebook(nn.Module):
+    def __init__(self, codebooks, num_special_tokens, pad_token_id):
+        super(MergedCodebook, self).__init__()
+        self.n_levels, self.num_embeddings, self.embed_dim = codebooks.shape
 
-        layers = []
-        for h_dim in reversed(hidden_dims):
-            layers.append(nn.Linear(z_dim, h_dim))
-            if use_batch_norm:
-                layers.append(nn.BatchNorm1d(h_dim))
-            if non_linear:
-                # layers.append(nn.ReLU())
-                layers.append(nn.PReLU())
-            if dropout > 0.0:
-                layers.append(nn.Dropout(dropout))
-            z_dim = h_dim
-        layers.append(nn.Linear(z_dim, out_dim))
-        if use_batch_norm:
-            layers.append(nn.BatchNorm1d(out_dim))
+        total_embeddings = (self.num_embeddings * self.n_levels) + num_special_tokens
+        self.embedding = nn.Embedding(total_embeddings, self.embed_dim, padding_idx=pad_token_id)
+        self.embedding.weight.data.uniform_(-1.0 / total_embeddings, 1.0 / total_embeddings)
 
-        self.layers = nn.Sequential(*layers)
 
-    def forward(self, z):
-        return self.layers(z)
-    
+        # Now, copy the pretrained weights to the new embedding layer
+        start_idx = 0
+        for level in range(self.n_levels):
+            curr_codebook = codebooks[level, :, :]
+            size = curr_codebook.shape[0]
+
+            self.embedding.weight.data[start_idx:start_idx+size].copy_(curr_codebook)
+            start_idx += size
+
+    def freeze_embeddings(self):
+        self.embedding.weight.requires_grad = False
+
+    def forward(self, x):
+        return self.embedding(x)

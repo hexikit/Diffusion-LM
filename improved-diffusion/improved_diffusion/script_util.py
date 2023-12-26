@@ -1,11 +1,13 @@
 import argparse
 import inspect
+import torch
 
 from . import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
 from .unet import SuperResModel, UNetModel
 from .transformer_model import TransUNetModel
 from .transformer_model2 import TransformerNetModel, TransformerNetModel2
+from .transformer_model3 import TransformerNetModel3
 NUM_CLASSES = 1000
 
 
@@ -37,7 +39,7 @@ def model_and_diffusion_defaults():
         in_channel=8,
         out_channel=8,
         training_mode='emb',
-        vocab_size=66,
+        vocab_size=1030,
         config_name='bert-base-uncased',
         experiment_mode='lm',
         logits_mode=1,
@@ -72,6 +74,7 @@ def create_model_and_diffusion(
     config_name,
     experiment_mode,
     logits_mode,
+    codebook,
     **kwargs,
 ):
     model = create_model(
@@ -94,6 +97,7 @@ def create_model_and_diffusion(
         config_name=config_name,
         experiment_mode=experiment_mode,
         logits_mode=logits_mode,
+        codebook=codebook
     )
     diffusion = create_gaussian_diffusion(
         steps=diffusion_steps,
@@ -131,6 +135,7 @@ def create_model(
     config_name='',
     experiment_mode='lm',
     logits_mode=1,
+    codebook=None
 ):
     print(f'creating model, based on {model_arch}')
     if model_arch == 'conv-unet':
@@ -252,7 +257,7 @@ def create_model(
         for res in attention_resolutions.split(","):
             attention_ds.append(image_size // int(res))
 
-        return TransformerNetModel2(
+        return TransformerNetModel3(
             in_channels=in_channel,  # 3, DEBUG**
             model_channels=num_channels,
             out_channels=(out_channel if not learn_sigma else out_channel*2),  # DEBUG**  (3 if not learn_sigma else 6),
@@ -270,6 +275,8 @@ def create_model(
             vocab_size=vocab_size,
             experiment_mode=experiment_mode,
             logits_mode=logits_mode,
+            codebook=codebook,
+            freeze_embs=False,
         )
     else:
         raise NotImplementedError
