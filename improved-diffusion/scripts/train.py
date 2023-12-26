@@ -8,6 +8,7 @@ import numpy as np
 from improved_diffusion import dist_util, logger
 from improved_diffusion.image_datasets import load_data
 from improved_diffusion.text_datasets import load_data_text
+from improved_diffusion.outfit_datasets import load_data_outfit
 from improved_diffusion.resample import create_named_schedule_sampler
 from improved_diffusion.script_util import (
     model_and_diffusion_defaults,
@@ -66,7 +67,11 @@ def main():
             class_cond=args.class_cond,
         )
         data_valid = None
-
+    elif args.modality == 'outfit':
+        data = load_data_outfit(
+            args
+        )
+        data_valid = None
     else:
         print('load data', '*'*50)
         if args.modality == 'roc-aug' or args.modality == 'commonGen-aug':
@@ -103,7 +108,8 @@ def main():
             load_vocab=rev_tokenizer,
             model=model22,
         )
-        next(data)
+        # next(data)
+        # print(f"DATA: {next(data)}")
         model2, tokenizer = load_models(args.modality, args.experiment, args.model_name_or_path, args.in_channel,
                                         args.checkpoint_path, extra_args=args)
         if args.modality == 'book' or args.use_bert_tokenizer == 'yes':
@@ -197,8 +203,33 @@ def create_argparser():
                          emb_scale_factor=1.0, noise_level=0.0, cache_mode='no', use_bert_tokenizer='no',
                          padding_mode='block',
                          preprocessing_num_workers=1)
+    
+    outfit_defaults = dict(modality='outfit',
+                         config='diffusion_lm/synthetic_data/configs/emnlp2020/experiments/difflm_seed0_m3_k128_trainc20000.yaml',
+                         model_name_or_path='predictability/diff_models/compress_e=5_b=60_m=gpt2_wikitext-103-raw-v1_None',
+                         experiment='gpt2_pre_compress',model_arch='transformer',
+                         img_embed_dim=512,
+                         txt_embed_dim=512,
+                         outfit_min_items=4,
+                         outfit_max_items=8,
+                         rqvae_codebook_n_levels=4,
+                         rqvae_codebook_size=256,
+                         rqvae_latent_dim=64,
+                         rqvae_dropout=0.0,
+                         pretrained_rqvae='/content/drive/MyDrive/FitFormer/runs/rq_vae/nondisjoint/rq_vae_5_a/ep20_checkpoint.pth',
+                         polyvore_split='nondisjoint',
+                         datadir='data',
+                         embedsdir='/content/drive/MyDrive/FitFormer/embeds/nondisjoint/fashion_clip_embeds_text2outfit',
+                         txt_enc_model='patrickjohncyh/fashion-clip',
+                         img_enc_model='patrickjohncyh/fashion-clip',
+                         norm_embeds=True,
+                         debug=False,
+                         emb_scale_factor=1.0, noise_level=0.0, cache_mode='no', use_bert_tokenizer='no',
+                         padding_mode='block',
+                         preprocessing_num_workers=1)
     defaults.update(model_and_diffusion_defaults())
     defaults.update(text_defaults)
+    defaults.update(outfit_defaults)
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
     return parser
