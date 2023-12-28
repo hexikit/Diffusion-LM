@@ -106,7 +106,7 @@ if __name__ == '__main__':
                   f"--checkpoint_path {Model_FILE} " \
                   f"--model_arch {args.model_arch} " \
                   f"--modality {args.modality} " \
-                  f"--save_interval 50000 --lr {args.lr} " \
+                  f"--save_interval 1000 --lr {args.lr} " \
                   f"--batch_size {args.bsz}  " \
                   f"--diffusion_steps {args.diff_steps} " \
                   f"--noise_schedule {args.noise_schedule} {train_setup} " \

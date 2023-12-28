@@ -559,6 +559,8 @@ def reorder_outfits(item_id_to_l1_code, outfit_id_to_item_ids_list):
 class PolyvoreOutfitCatalog(PolyvoreItemCatalog):
     def __init__(self, args, split, meta_data, device, outfit_tokenizer_model, special_tokens_dict, special_tokens_to_embs, max_txt_len=77, transform=None, loader=default_image_loader, pretrain=True):
         super().__init__(args, split, meta_data, device, max_txt_len, transform, loader)
+        model_base_name = os.path.basename(os.path.split(args.model_path)[0]) + f'.{os.path.split(args.model_path)[1]}'
+        self.model_artifacts_dir = os.path.join(args.out_dir, model_base_name)
         self.special_tokens_dict = special_tokens_dict
         self.special_tokens_to_embs = special_tokens_to_embs
 
@@ -569,10 +571,9 @@ class PolyvoreOutfitCatalog(PolyvoreItemCatalog):
         self.mask_token_id = special_tokens_dict['mask_token_id']
         self.retrieval_token_id = special_tokens_dict['retrieval_token_id']
 
-
-        # self.use_retrieval_token = args.use_retrieval_token
-        # if self.use_retrieval_token:
-        #     print(f"Training w/ retrieval token")
+        self.use_retrieval_token = args.use_retrieval_token
+        if self.use_retrieval_token:
+            print(f"Training w/ retrieval token")
 
         self.codebook_n_levels = outfit_tokenizer_model.codebook_n_levels
         self.vocab_size = outfit_tokenizer_model.codebook_n_levels * outfit_tokenizer_model.codebook_size
@@ -702,20 +703,73 @@ class PolyvoreOutfitCatalog(PolyvoreItemCatalog):
 
             # tokenized_outfit, outfit_item_seqmentation = self._tokenize_outfit(outfit_item_idxs, self.max_split_set_outfit_len)
 
-            
-
-        # Quantize all items to get tuples and their quantized embeds for FITB
-        # if self.is_train:
-        #     all_tokenized_outfits = []
-        #     all_outfit_item_segmentation = []
-        #     for outfit_id in self.split_set_outfit_ids:
-        #         tokenized_outfit_sequence, outfit_item_segmentation = self._construct_outfit_item_codes(outfit_id, self.max_split_set_outfit_len)
-        #         all_tokenized_outfits.append(tokenized_outfit_sequence)
-        #         all_outfit_item_segmentation.append(outfit_item_segmentation)
-        #     self.split_set_tokenized_outfits = torch.stack(all_tokenized_outfits)
-        #     self.split_set_outfit_item_segmentation = torch.stack(all_outfit_item_segmentation)
-
         print(f"Finished loading {split} outfit dataset\n")
+
+    def outfit_item_codes_to_outfit_item_ids(self, outfit_item_codes):
+        # Shape: (n_items, item_seq_len)
+        # List of tuples
+        # outfit_item_ids = [self.item_quantized_codes_to_item_ids[tuple(item_code.tolist())][0] for item_code in outfit_item_codes]
+        outfit_item_ids = []
+        for item_code in outfit_item_codes:
+            item_code_tuple = tuple(item_code.tolist())
+            print(f"item_code_tuple: {item_code_tuple}")
+            item_ids_list = self.item_quantized_codes_to_item_ids[tuple(item_code.tolist())]
+            print(f"item_ids_list: {item_ids_list}")
+            if len(item_ids_list) == 0:
+                code_len = len(item_code)
+                for i in range(1, code_len):
+                    next_tokens = list(self.item_quantized_code_to_item_ids_prefix_tree[tuple(item_code.tolist())[:code_len-i]])
+                    print(f"tuple(item_code.tolist())[:code_len-i]: {tuple(item_code.tolist())[:code_len-i]}")
+                    print(f"next_tokens: {next_tokens}")
+                    # outfit_item_ids.append(item_ids_list[0])
+                    sampled_code = tuple(item_code.tolist())[:code_len-i] + (next_tokens[0],)
+                    item_ids_list = self.item_quantized_codes_to_item_ids[sampled_code]
+                    if len(item_ids_list) > 0:
+                        break
+
+            outfit_item_ids.append(item_ids_list[0])
+
+        return outfit_item_ids
+
+    def save_generated_outfit_new(self, name, sample_idx, generated_outfits):
+        n_generated_outfits = len(generated_outfits)
+
+        # Set up the figure
+        generated_outfit_len = len(generated_outfits[0])
+        fig, axs = plt.subplots(n_generated_outfits, generated_outfit_len, figsize=(16, 4))
+
+        fig.suptitle(f"Sample#{sample_idx}", fontsize=16)
+
+        # Display the generated outfits on bottom in order of ranking
+        for i in range(n_generated_outfits):
+            generated_outfit = generated_outfits[i]
+            generated_outfit_len = len(generated_outfit)
+            try:
+                generated_outfit_item_ids = self.outfit_item_codes_to_outfit_item_ids(generated_outfit)
+            except:
+                plt.close()
+                return
+            print(f"generated_outfit_item_ids: {generated_outfit_item_ids}")
+            for j in range(generated_outfit_len):
+                generated_outfit_items_images = [self._load_image(item_id) for item_id in generated_outfit_item_ids]
+
+                if n_generated_outfits > 1:
+                    axs[i, j].imshow(generated_outfit_items_images[j])
+                    axs[i, j].axis('off')  # hide axis
+                else:
+                    axs[j].imshow(generated_outfit_items_images[j])
+                    axs[j].axis('off')  # hide axis
+
+        
+        # generated_outfits_dir = os.path.join(self.model_artifacts_dir, str(name))
+        # if not os.path.exists(generated_outfits_dir):
+        #     os.makedirs(generated_outfits_dir)
+
+        # img_path = os.path.join(self.generated_outfits_dir, f"sample#{str(sample_idx)}.png")
+        img_path = os.path.join(self.model_artifacts_dir, f"sample#{str(sample_idx)}.png")
+        print(f"Saving to {img_path}")
+        plt.savefig(img_path)
+        plt.close()
 
     def get_data(self):
         data = []
@@ -726,7 +780,7 @@ class PolyvoreOutfitCatalog(PolyvoreItemCatalog):
             tokenized_outfit_item_codes, tokenized_outfit_item_code_embs = self._tokenize_outfit(outfit_items_idxs)
 
             current_length = tokenized_outfit_item_codes.shape[0]
-            max_sequence_length = self.max_split_set_outfit_len * (self.codebook_n_levels + 1)
+            max_sequence_length = 1 + ((self.max_split_set_outfit_len + 1) * self.codebook_n_levels) + 1
             # print(f"current_length: {current_length}")
             # print(f"max_sequence_length: {max_sequence_length}")
 
@@ -754,7 +808,6 @@ class PolyvoreOutfitCatalog(PolyvoreItemCatalog):
             data.append(sample)
         return data
     
-
 
     def _construct_outfit_split_set(self, invalid_item_idxs_set, outfit_min_items, outfit_max_items):
         invalid_outfit_ids_set = get_invalid_outfit_ids(invalid_item_idxs_set, self.outfit_id_to_item_idxs)
@@ -862,7 +915,7 @@ class PolyvoreOutfitCatalog(PolyvoreItemCatalog):
                         break
 
             outfit_item_ids.append(item_ids_list[0])
-
+        print(f"outfit_item_ids: {outfit_item_ids}")
         return outfit_item_ids
 
     def save_generated_outfit_new(self, name, sample_idx, generated_outfits):
@@ -879,6 +932,7 @@ class PolyvoreOutfitCatalog(PolyvoreItemCatalog):
             generated_outfit = generated_outfits[i]
             generated_outfit_len = len(generated_outfit)
             try:
+                print(f"Generated outfit sequence: {generated_outfit}")
                 generated_outfit_item_ids = self.outfit_item_codes_to_outfit_item_ids(generated_outfit)
             except:
                 plt.close()
@@ -961,11 +1015,18 @@ class PolyvoreOutfitCatalog(PolyvoreItemCatalog):
 
         outfit_items_codes_tensor = self.item_idx_to_quantized_code[outfit_items_idxs_tensor].clone()
         outfit_items_code_embs_tensor = self.item_idx_to_quantized_code_embs[outfit_items_idxs_tensor].clone()
-
-        latent_dim = outfit_items_code_embs_tensor.shape[-1]
         # print(f"outfit_items_codes_tensor: {outfit_items_codes_tensor.shape}")
         # print(f"outfit_items_code_embs_tensor: {outfit_items_code_embs_tensor.shape}")
 
+        if self.use_retrieval_token:
+            # n_items, item_code_len
+            outfit_items_codes_tensor[:, -1] = self.retrieval_token_id
+
+            # n_items, item_code_len, latent_dim
+            retrieval_token_emb = self.special_tokens_to_embs[self.retrieval_token_id].clone().unsqueeze(1)
+            outfit_items_code_embs_tensor[:, -1, :] = retrieval_token_emb
+
+        latent_dim = outfit_items_code_embs_tensor.shape[-1]
         outfit_items_codes_flattened = outfit_items_codes_tensor.flatten()
         outfit_items_code_embs_flattened = outfit_items_code_embs_tensor.view(-1, latent_dim)
         # print(f"outfit_items_codes_flattened: {outfit_items_codes_flattened.shape}")

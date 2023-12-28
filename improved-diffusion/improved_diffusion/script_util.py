@@ -8,6 +8,7 @@ from .unet import SuperResModel, UNetModel
 from .transformer_model import TransUNetModel
 from .transformer_model2 import TransformerNetModel, TransformerNetModel2
 from .transformer_model3 import TransformerNetModel3
+from transformers.models.bert.configuration_bert import BertConfig
 NUM_CLASSES = 1000
 
 
@@ -257,6 +258,19 @@ def create_model(
         for res in attention_resolutions.split(","):
             attention_ds.append(image_size // int(res))
 
+        config = BertConfig(
+            vocab_size=vocab_size,
+            hidden_size=64,
+            num_hidden_layers=6,
+            num_attention_heads=4,
+            intermediate_size=64 * 4,
+            hidden_act='gelu',
+            hidden_dropout_prob=0.1,
+            attention_probs_dropout_prob=0.1,
+            max_position_embeddings=128,
+            type_vocab_size=2,
+        )
+
         return TransformerNetModel3(
             in_channels=in_channel,  # 3, DEBUG**
             model_channels=num_channels,
@@ -271,6 +285,7 @@ def create_model(
             num_heads_upsample=num_heads_upsample,
             use_scale_shift_norm=use_scale_shift_norm,
             config_name=config_name,
+            config=config,
             training_mode=training_mode,
             vocab_size=vocab_size,
             experiment_mode=experiment_mode,

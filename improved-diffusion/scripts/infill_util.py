@@ -17,6 +17,65 @@ def get_score(input_embs, label_ids, model_control, t=None):
     return loss.sum(dim=-1).tolist()
 
 
+def langevin_fn_outfit(debug_lst, model_control, model3, prompt_embs, step_size, sample, mean, sigma,
+                 alpha, t, prev_sample):  # current best.
+    if t[0].item() < 10:
+        K = 0
+    else:
+        K = 3
+    # K = 3
+
+    if t[0].item() > 0:
+        tt = t[0].item() - 1
+    else:
+        tt = 200
+    # label_ids = label_ids.cuda()
+    # tgt_embs = model3(label_ids[:, sample.size(1):])
+
+    # label_ids2 = label_ids.clone()
+    # label_ids2[:, :65] = -100
+    prompt_embs = prompt_embs.cuda()
+    input_embs_param = th.nn.Parameter(sample)
+    if False:
+        input_embs = th.cat([input_embs_param, tgt_embs], dim=1)
+        debug_lst.append(get_score(input_embs, label_ids2, model_control, t=tt))
+        
+    with th.enable_grad():
+        for i in range(K):
+            optimizer = th.optim.Adagrad([input_embs_param], lr=step_size)
+            optimizer.zero_grad()
+            # input_embs = th.cat([input_embs_param, tgt_embs], dim=1)
+
+            input_embs = input_embs_param
+            model_out = model_control(
+                input_embs=input_embs,
+                text_embs=prompt_embs,
+            )
+
+            coef = 0.01
+            # coef=1.
+            if sigma.mean() == 0:
+                logp_term = coef * ((mean - input_embs_param) ** 2 / 1.).mean(dim=0).sum()
+            else:
+                logp_term = coef * ((mean - input_embs_param) ** 2 / sigma).mean(dim=0).sum()
+            # print(model_out.loss, f'start_{i}', logp_term.item(), t[0].item(), sigma.mean().item())
+            loss = model_out.loss + logp_term
+            loss.backward()
+            optimizer.step()
+            epsilon = th.randn_like(input_embs_param.data)
+            input_embs_param = th.nn.Parameter((input_embs_param.data + 0.0 * sigma.mean().item() * epsilon).detach())
+            # input_embs_param = th.nn.Parameter((input_embs_param.data +
+            #                                    np.sqrt(2*sigma.mean().item()) * epsilon).detach())
+
+    # input_embs = th.cat([input_embs_param, tgt_embs], dim=1)
+    # model_out = model_control(input_embs=input_embs,
+    #                           labels=label_ids2,
+    #                           t=tt)
+    # print(model_out.loss, 'end')
+
+    return input_embs_param.data
+
+
 def langevin_fn3(debug_lst, model_control, model3, label_ids, step_size, sample, mean, sigma,
                  alpha, t, prev_sample):  # current best.
     if t[0].item() < 10:

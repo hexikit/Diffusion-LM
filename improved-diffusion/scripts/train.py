@@ -32,7 +32,7 @@ def main():
     dist_util.setup_dist() # DEBUG **
     logger.configure()
 
-    vocab_size = args.rqvae_codebook_n_levels * args.rqvae_codebook_n_levels
+    vocab_size = args.rqvae_codebook_n_levels * args.rqvae_codebook_size
     special_tokens_dict = {
         'start_token_id': vocab_size,
         'end_token_id': vocab_size + 1,
@@ -44,6 +44,7 @@ def main():
     n_special_tokens = len(special_tokens_dict)
     vocab_size += n_special_tokens
     args.vocab_size = vocab_size
+    print(f"Vocab size: {args.vocab_size}")
 
     rq_vae = RQVAENew(args)
     if args.pretrained_rqvae:
@@ -58,7 +59,7 @@ def main():
     special_tokens_to_embs = {}
     for special_token, special_token_id in special_tokens_dict.items():
         special_token_tensor = torch.tensor([special_token_id])
-        special_tokens_to_embs[special_token] = merged_codebook(special_token_tensor)
+        special_tokens_to_embs[special_token_id] = merged_codebook(special_token_tensor).detach()
 
 
     logger.log("creating model and diffusion...")
@@ -222,13 +223,13 @@ def create_argparser():
         microbatch=-1,  # -1 disables microbatches
         ema_rate="0.9999",  # comma-separated list of EMA values
         log_interval=50,
-        save_interval=50000,
+        save_interval=1000,
         resume_checkpoint="",
         use_fp16=False,
         fp16_scale_growth=1e-3,
         seed=101,
         gradient_clipping=-1.0,
-        eval_interval=2000,
+        eval_interval=1000,
         checkpoint_path='diff_models'
     )
     text_defaults = dict(modality='text',
@@ -267,6 +268,8 @@ def create_argparser():
                          txt_enc_model='patrickjohncyh/fashion-clip',
                          img_enc_model='patrickjohncyh/fashion-clip',
                          norm_embeds=True,
+                         use_retrieval_token=False,
+                         eval_batch_size=1024,
                          debug=False,
                          emb_scale_factor=1.0, noise_level=0.0, cache_mode='no', use_bert_tokenizer='no',
                          padding_mode='block',

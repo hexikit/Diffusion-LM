@@ -2,6 +2,7 @@ from .transformer_utils import BertAttention, trans_nd, layer_norm
 from transformers import AutoConfig
 # from transformers import BertEncoder
 from transformers.models.bert.modeling_bert import BertEncoder
+from transformers.models.bert.configuration_bert import BertConfig
 import torch
 from abc import abstractmethod
 
@@ -114,7 +115,9 @@ class TransformerNetModel3(nn.Module):
             with th.no_grad():
                 self.lm_head.weight = self.word_embedding.weight
         elif codebook:
-            self.word_embedding = codebook.embedding
+            # self.word_embedding = codebook.embedding
+            self.word_embedding = nn.Embedding(vocab_size, self.in_channels)
+            self.word_embedding.weight.data = codebook.embedding.weight.data
             if freeze_embs:
                 self.word_embeddings.weight.requires_grad = False
 

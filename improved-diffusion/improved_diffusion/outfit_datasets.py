@@ -8,6 +8,36 @@ from .outfit_catalogs import PolyvoreOutfitCatalog
 from .rq_vae import RQVAENew
 
 def load_data_outfit(args, split, special_tokens_dict, special_tokens_to_embs):
+    num_cpus = os.cpu_count()
+    print(f"Workers available: {num_cpus}")
+
+    outfit_catalog = get_outfit_catalog(args, split, special_tokens_dict, special_tokens_to_embs)
+    training_data = outfit_catalog.get_data()
+
+    dataset = OutfitDataset(
+        training_data,
+        args
+        # image_size,
+        # data_args,
+        # model_arch=data_args.model_arch,
+    )
+
+    # bsz = args.batch_size if split == 'train' else args.eval_batch_size
+    # bsz = args.batch_size
+    # print(f"{split} batch size: {bsz}")
+    # data_loader = DataLoader(
+    #     dataset,
+    #     batch_size=bsz,  # 20,
+    #     drop_last=True,
+    #     shuffle=False,
+    #     num_workers=num_cpus,
+    # )
+    data_loader = get_data_loader(args, split, dataset, num_cpus)
+    
+    while True:
+        yield from data_loader
+
+def get_outfit_catalog(args, split, special_tokens_dict, special_tokens_to_embs):
     device = torch.device('cpu')
 
     rq_vae = RQVAENew(args)
@@ -23,27 +53,19 @@ def load_data_outfit(args, split, special_tokens_dict, special_tokens_to_embs):
     fn = os.path.join(args.datadir, 'polyvore_outfits', 'polyvore_item_metadata.json')
     meta_data = json.load(open(fn, 'r'))
 
-    outfit_catalog = PolyvoreOutfitCatalog(args, split, meta_data, device, rq_vae, special_tokens_dict)
-    training_data = outfit_catalog.get_data()
+    outfit_catalog = PolyvoreOutfitCatalog(args, split, meta_data, device, rq_vae, special_tokens_dict, special_tokens_to_embs)
+    return outfit_catalog
 
-    dataset = OutfitDataset(
-        training_data,
-        args
-        # image_size,
-        # data_args,
-        # model_arch=data_args.model_arch,
-    )
-
-    data_loader = DataLoader(
+def get_data_loader(args, split, dataset, num_cpus):
+    bsz = args.batch_size
+    print(f"{split} batch size: {bsz}")
+    return DataLoader(
         dataset,
-        batch_size=64,  # 20,
+        batch_size=bsz,  # 20,
         drop_last=True,
         shuffle=False,
-        num_workers=1,
+        num_workers=num_cpus,
     )
-    
-    while True:
-        yield from data_loader
 
 class OutfitDataset(Dataset):
     def __init__(self, outfit_datasets, data_args, model_arch='conv-unet',

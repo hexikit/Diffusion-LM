@@ -108,3 +108,45 @@ class MergedCodebook(nn.Module):
 
     def forward(self, x):
         return self.embedding(x)
+    
+
+class AutoEncoder(nn.Module):
+    def __init__(self, config):
+        super(AutoEncoder, self).__init__()
+        # torch.manual_seed(config.seed)
+        self.debug = config.debug
+        self.input_dim = config.item_embed_dim
+        self.latent_dim = config.rqvae_latent_dim
+
+        self.mlp_dim = 1024
+        self.mlp_hidden_dim = 512
+        self.mlp_layers = 1
+        self.use_batch_norm = False
+        self.dropout = 0.0
+        
+        self.encoder = nn.Sequential(
+            # input is assumed to an already normalized clip embedding
+            nn.Linear(self.input_dim, self.mlp_dim, bias=False),
+            nn.GELU(),
+            nn.LayerNorm(self.mlp_dim),
+            *[
+                Block(self.mlp_dim, self.mlp_hidden_dim)
+                for _ in range(self.mlp_layers)
+            ],
+            nn.Linear(self.mlp_dim, self.input_dim, bias=False),
+            # normalize before passing to VQ?
+            nn.GELU(),
+            nn.LayerNorm(self.input_dim),
+            nn.Linear(self.input_dim, self.latent_dim, bias=False)
+        )
+
+        self.decoder = nn.Linear(self.latent_dim, self.input_dim, bias=False)
+
+    def encode(self, x):
+        z = self.encoder(x)
+        return z
+    
+    def forward(self, x):
+        z = self.encode(x)
+        x_hat = self.decoder(z)
+        return x_hat
